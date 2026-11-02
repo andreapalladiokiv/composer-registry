@@ -88,15 +88,21 @@ Tags that existed before a repository was admitted are published the same way, o
 
 ## Maintaining it
 
-A `p2/` file is in Composer's minified form: the newest version is whole and every older one holds
-only what differs from the one before it. Removing or editing a version by hand corrupts the ones
-after it, so changes go through `bin/publish.php`, in a pull request to `main`:
+Everything other than publishing is the `maintain` workflow (Actions → maintain → Run workflow, or
+`gh workflow run maintain.yml -f operation=… -f package=… -f argument=… -f reason=…`). Running it takes
+write access to this repository. Each run is one commit naming the operation, the reason and who ran it,
+so the history of `p2/` is the registry's audit log.
 
-- **withdraw a version:** `php bin/publish.php --withdraw vendor/name X.Y.Z`. A withdrawn version is
-  gone from the registry, so it could be published again, from any commit: withdraw rarely;
-- **rebuild `packages.json`:** `php bin/publish.php --index-only`.
+| operation | package | argument | does |
+|---|---|---|---|
+| `withdraw` | vendor/name | X.Y.Z | takes the version out; it could then be published again, from any commit — use rarely |
+| `abandon` | vendor/name | optional vendor/replacement | marks every version abandoned, Composer warns on install |
+| `unabandon` | vendor/name | | undoes `abandon` |
+| `transfer` | vendor/name | owner/repo | the source repository moved; refused unless the target holds every published commit |
+| `reindex` | | | rebuilds `packages.json` from `p2/` |
 
-Handing a name to another repository or marking a package abandoned has no command yet.
+`p2/` files are in Composer's minified form — each version holds only what differs from the newer
+one before it — so they are not edited by hand: removing one version would corrupt the ones after it.
 
 The registry's own settings: the variable `REGISTRY_APP_ID` and the secret `REGISTRY_APP_KEY` (the
 App's private key). A workflow here can read every admitted repository through that key, so `main`
