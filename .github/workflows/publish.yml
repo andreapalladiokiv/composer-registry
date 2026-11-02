@@ -1,25 +1,23 @@
-name: Publish to the Composer registry
+name: publish
+run-name: publish ${{ inputs.repository }} ${{ inputs.tag }}
 
-# Called from a package's own repository when it pushes a release tag:
-#
-#   on: { push: { tags: ['v*'] } }
-#   jobs:
-#     publish:
-#       uses: andreapalladiokiv/composer-registry/.github/workflows/publish.yml@main
-#       secrets: { REGISTRY_DEPLOY_KEY: ${{ secrets.REGISTRY_DEPLOY_KEY }} }
-#
-# The caller is github.repository; owners.yml decides which names it may publish.
+# Started by the `publish` action from a package's release pipeline. Whatever asked only names a
+# repository and a tag: the registry checks the repository in owners.yml, reads the tag with its own
+# read-only deploy key for that repository, and writes p2/ with its own GITHUB_TOKEN. Nothing outside
+# this repository can write to it.
 
 on:
-  workflow_call:
+  workflow_dispatch:
     inputs:
-      path:
-        description: Directory of the package inside the caller's repository
-        type: string
-        default: .
-    secrets:
-      REGISTRY_DEPLOY_KEY:
+      repository:
+        description: owner/repo the tag is in
         required: true
+      tag:
+        description: Release tag, vX.Y.Z
+        required: true
+
+permissions:
+  contents: write
 
 concurrency:
   group: composer-registry
@@ -29,31 +27,39 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out the package
-        uses: actions/checkout@v4
-        with:
-          path: package
-
       - name: Check out the registry
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+
+      - name: Check the request
+        id: request
+        env:
+          SOURCE: ${{ inputs.repository }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || { echo "::error::$TAG is not a release tag"; exit 1; }
+          grep -qE "^[^#].*:[[:space:]]*${SOURCE//./\\.}[[:space:]]*$" owners.yml || { echo "::error::$SOURCE owns no package in owners.yml"; exit 1; }
+          # The deploy key of a repository is the secret DEPLOY_KEY_<OWNER>_<REPO>, in upper case.
+          echo "key=DEPLOY_KEY_$(tr 'a-z' 'A-Z' <<< "$SOURCE" | tr -c 'A-Z0-9\n' '_')" >> "$GITHUB_OUTPUT"
+
+      - name: Read the tag
+        uses: actions/checkout@v5
         with:
-          repository: andreapalladiokiv/composer-registry
-          ssh-key: ${{ secrets.REGISTRY_DEPLOY_KEY }}
-          path: registry
+          repository: ${{ inputs.repository }}
+          ref: refs/tags/${{ inputs.tag }}
+          ssh-key: ${{ secrets[steps.request.outputs.key] }}
+          path: package
+          persist-credentials: false
 
       - name: Publish
         env:
-          REPO: ${{ github.repository }}
-          SHA: ${{ github.sha }}
-          TAG: ${{ github.ref_name }}
-          DIR: ${{ inputs.path }}
+          SOURCE: ${{ inputs.repository }}
+          TAG: ${{ inputs.tag }}
         run: |
-          version="${TAG##*/v}"; version="${version#v}"
-          cd registry
-          php bin/publish.php "$REPO" "$version" "$SHA" "$GITHUB_WORKSPACE/package/$DIR/composer.json"
+          sha=$(git -C package rev-parse HEAD)
+          php bin/publish.php "$SOURCE" "${TAG#v}" "$sha" package/composer.json
           git config user.name composer-registry
           git config user.email composer-registry@users.noreply.github.com
           git add p2 packages.json
-          git diff --cached --quiet && exit 0
-          git commit -q -m "Publish $(jq -r .name "$GITHUB_WORKSPACE/package/$DIR/composer.json") $version from $REPO"
-          for i in 1 2 3; do git push && exit 0; git pull --rebase -q; done; exit 1
+          git diff --cached --quiet && { echo "already published"; exit 0; }
+          git commit -q -m "Publish $(jq -r .name package/composer.json) ${TAG#v} from $SOURCE"
+          git push
