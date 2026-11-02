@@ -8,7 +8,8 @@ package is whoever may read that repository.
 ```json
 "repositories": [{
   "type": "composer",
-  "url": "https://raw.githubusercontent.com/andreapalladiokiv/composer-registry/main"
+  "url": "https://api.github.com/repos/andreapalladiokiv/composer-registry/contents/packages.json?ref=main",
+  "options": {"http": {"header": ["Accept: application/vnd.github.raw"]}}
 }]
 ```
 plus `composer config --global github-oauth.github.com <token>`.
