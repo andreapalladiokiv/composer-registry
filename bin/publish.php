@@ -13,6 +13,12 @@ declare(strict_types=1);
  * Writes p2/<name>.json (Composer 2 metadata, one file per package) and refreshes packages.json.
  */
 
+chdir(dirname(__DIR__));
+if (($argv[1] ?? null) === '--index-only') {
+    write_index();
+    exit(0);
+}
+
 [, $repo, $version, $sha, $manifestPath] = $argv + [null, null, null, null, null];
 if ($manifestPath === null || ! preg_match('/^\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$/', $version) || ! preg_match('/^[0-9a-f]{40}$/', $sha)) {
     fail('usage: php bin/publish.php <owner/repo> <X.Y.Z> <sha> <composer.json>');
@@ -54,11 +60,16 @@ usort($versions, static fn ($a, $b) => version_compare($b['version'], $a['versio
 @mkdir(dirname($file), 0777, true);
 write($file, ['packages' => [$name => array_values($versions)]]);
 
-$available = array_map(static fn ($f) => substr($f, 3, -5), glob('p2/*/*.json'));
-sort($available);
-write('packages.json', ['metadata-url' => 'https://api.github.com/repos/andreapalladiokiv/composer-registry/contents/p2/%package%.json?ref=main', 'available-packages' => $available]);
+write_index();
 
 echo "published $name $version from $repo@$sha\n";
+
+function write_index(): void
+{
+    $available = array_map(static fn ($f) => substr($f, 3, -5), glob('p2/*/*.json'));
+    sort($available);
+    write('packages.json', ['metadata-url' => 'https://api.github.com/repos/andreapalladiokiv/composer-registry/contents/p2/%package%.json?ref=main', 'available-packages' => $available]);
+}
 
 function write(string $path, array $data): void
 {

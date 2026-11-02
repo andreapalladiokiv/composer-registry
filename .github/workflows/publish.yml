@@ -20,9 +20,9 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: composer-registry
-  cancel-in-progress: false
+# No concurrency group: GitHub keeps one pending run per group and cancels the one before it, which
+# would drop a release when three arrive together. Runs race instead, and the push below rebases:
+# each package writes its own p2/ file, and packages.json is rewritten from the files.
 
 jobs:
   publish:
@@ -79,4 +79,14 @@ jobs:
           git add p2 packages.json
           git diff --cached --quiet && { echo "already published"; exit 0; }
           git commit -q -m "Publish $(jq -r .name package/composer.json) ${TAG#v} from $SOURCE"
-          git push
+          for attempt in 1 2 3 4 5; do
+            git push -q && exit 0
+            git fetch -q origin main
+            git rebase -q origin/main || {
+              # Only packages.json can conflict; it is derived from p2/, so rebuild it.
+              git checkout -q --theirs packages.json 2>/dev/null
+              php bin/publish.php --index-only && git add packages.json && GIT_EDITOR=true git rebase --continue
+            }
+            sleep $((attempt * 2))
+          done
+          exit 1
