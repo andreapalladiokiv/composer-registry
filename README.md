@@ -27,28 +27,48 @@ token only to GitHub's own hosts; a private registry on `raw.githubusercontent.c
 
 ### Once per repository
 
-**Admit it:** add the repository to the installation of the `composer-registry-demo` GitHub App
-(Settings → Applications → composer-registry-demo → Configure → Repository access). The App has
-Contents: read and nothing else. That is all: the package repository runs no workflow and holds no
-token. Removing it from the installation withdraws it; what it already published stays.
+1. **Admit it:** add the repository to the installation of the `composer-registry-demo` GitHub App
+   (Settings → Applications → composer-registry-demo → Configure → Repository access). The App has
+   Contents: read and nothing else. Removing it from the installation withdraws it; what it already
+   published stays.
+2. **Give its pipeline a trigger token** as the secret `COMPOSER_REGISTRY_TOKEN`, able to run workflows
+   in `composer-registry` and nothing else.
+3. **Add the release workflow:**
+
+   ```yaml
+   # .github/workflows/release.yml
+   name: Release
+   on:
+     push:
+       tags: ['v*']
+   jobs:
+     registry:
+       runs-on: ubuntu-latest
+       steps:
+         - uses: andreapalladiokiv/composer-registry/sync@main
+           with:
+             token: ${{ secrets.COMPOSER_REGISTRY_TOKEN }}
+   ```
 
 The package needs a `composer.json` at the root of the tag, with a `name` and without a `version`. A
 monorepo releases each package under a tag whose tree is that package's directory, e.g. `saga/v1.2.0`.
 
 ### Every release
 
-Push a tag `vX.Y.Z` (or `<package>/vX.Y.Z`). The `sync` workflow here publishes it, every 30 minutes
-or at once with `gh workflow run sync.yml -R andreapalladiokiv/composer-registry` (`-f repository=…`
-for one repository). The first sync after admission publishes every release tag the repository already
-has.
+Push a tag `vX.Y.Z` (or `<package>/vX.Y.Z`). The release workflow asks the registry to sync this
+repository and waits; a refused tag makes the release red. The action sends only the repository's name:
 
 ```
-sync.yml (schedule or dispatch)
-  1. the App issues a read-only token for every repository it is installed on
-  2. per repository, one tag listing; tags whose commit the registry already holds are skipped
+release.yml → sync action → sync.yml here, repository=owner/repo
+  1. the App issues a read-only token for that repository (not installed → refused)
+  2. one tag listing; tags whose commit the registry already holds are skipped
   3. per new tag: composer.json at the tag → bin/publish.php → p2/<vendor>/<name>.json
-  4. one commit for the whole sync
+  4. one commit
 ```
+
+The first sync after admission publishes every release tag the repository already has. By hand:
+`gh workflow run sync.yml -R andreapalladiokiv/composer-registry -f repository=owner/repo`, or without
+`repository` for every admitted one.
 
 ### What the registry refuses
 

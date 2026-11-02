@@ -1,27 +1,24 @@
 name: sync
 run-name: sync ${{ inputs.repository || 'all admitted repositories' }}
 
-# Brings the registry up to date with the release tags of every admitted repository: those the
-# composer-registry-demo GitHub App is installed on. Package repositories run nothing and hold no
-# token; a tag `vX.Y.Z` (or `<package>/vX.Y.Z`) in an admitted repository is published by the next
-# sync. bin/sync.php says what it skips and refuses.
+# Brings the registry up to date with the release tags of one admitted repository: one the
+# composer-registry-demo GitHub App is installed on. A package's release pipeline starts it through the
+# `sync` action on a tag; it names only its repository, and the registry reads that repository's tags
+# itself. Run without a repository by hand, it goes over every admitted one. bin/sync.php says what it
+# skips and refuses.
 
 on:
-  schedule:
-    - cron: '*/30 * * * *'
   workflow_dispatch:
     inputs:
       repository:
-        description: Only this owner/repo (empty = all admitted)
+        description: owner/repo to sync (empty = every admitted repository)
         default: ''
 
 permissions:
   contents: write
 
-# One sync covers everything, so a pending one replaced by a newer one loses nothing.
-concurrency:
-  group: composer-registry
-  cancel-in-progress: false
+# No concurrency group: GitHub keeps one pending run per group and cancels the one before it, which
+# would drop the sync of another repository. Runs race instead, and the push below rebases.
 
 jobs:
   sync:
@@ -60,7 +57,14 @@ jobs:
           git add p2 packages.json
           if ! git diff --cached --quiet; then
             git commit -q -m "Publish $(grep -c '^published ' "$RUNNER_TEMP/sync.log") versions" -m "$(grep '^published ' "$RUNNER_TEMP/sync.log")"
-            git push -q
+            pushed=
+            for attempt in 1 2 3 4 5; do
+              git push -q && { pushed=1; break; }
+              git fetch -q origin main
+              git rebase -q origin/main || { git checkout -q --theirs packages.json 2>/dev/null; php bin/publish.php --index-only && git add packages.json && GIT_EDITOR=true git rebase --continue; }
+              sleep $((attempt * 2))
+            done
+            [ -n "$pushed" ] || exit 1
           fi
           # A refused tag is a warning on the run, and the run is red until someone deals with it.
           [ "$status" = 0 ]
