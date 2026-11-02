@@ -4,8 +4,9 @@ A Composer repository for packages released from their own GitHub repositories. 
 only: every version points at the zipball of its source repository at the released commit, so whoever
 may read a package's repository may install it, and nobody else.
 
-Only this repository writes to itself. It reads the release tags of the repositories it is allowed to
-read and publishes them; package repositories take no part.
+Only this repository writes to itself. A package's release pipeline only asks it to look at that
+repository; the registry lists the repository's release tags, reads `composer.json` at the new ones
+with its own read access, and publishes them.
 
 ## Install packages from it
 
@@ -74,12 +75,33 @@ The first sync after admission publishes every release tag the repository alread
 
 A refused tag is skipped, reported as a warning, and leaves the run red; the rest of the sync goes on.
 
-| Tag | Result |
+| Request or tag | Result |
 |---|---|
+| a repository the App is not installed on | refused: not admitted, nothing is read |
 | no `composer.json` at the tag | refused |
 | a name first published from another repository | refused: the name belongs to that one |
 | a published version, moved to a different commit | refused: versions are immutable |
 | a tag that is not `vX.Y.Z` or `<package>/vX.Y.Z` | ignored |
+
+## Who can do what
+
+| To | One needs | Set by |
+|---|---|---|
+| install a package | read on this repository (metadata) and on the package's repository (zipball) | repository access; on a personal account every collaborator has write, read-only access needs an organization |
+| release a version | to push a release tag to an admitted repository | the package repository; a tag ruleset on `v*` (and `*/v*`) narrows it to release managers |
+| admit a repository | to manage the App's installation | the account or organization owners |
+| start a sync | the trigger token | which repositories hold `COMPOSER_REGISTRY_TOKEN` (in an organization, one organization secret with selected repositories) |
+| change what is published | write on this repository (`maintain`, or pushing to `main`) | this repository's collaborators |
+
+A sync request is not tied to the repository that sent it: `repository` is a plain input, and the run's
+actor is whoever owns the trigger token. This is on purpose. A sync decides nothing: it reads tags that
+already sit in an admitted repository, so a sync started by anyone only publishes earlier what the
+next release would publish anyway. What protects the registry is the App's installation (what may be
+read) and the package repositories' tag rules (who may release).
+
+Read access to this repository shows the metadata of every package — names, versions, requirements —
+also to someone who cannot read a package's sources. Packages that must stay unseen need a registry
+of their own.
 
 ## Maintaining it
 
@@ -98,6 +120,18 @@ so the history of `p2/` is the registry's audit log.
 
 `p2/` files are in Composer's minified form — each version holds only what differs from the newer
 one before it — so they are not edited by hand: removing one version would corrupt the ones after it.
+
+## What is here
+
+| Path | |
+|---|---|
+| `packages.json` | the entry point: where the per-package files are, and which packages exist |
+| `p2/<vendor>/<name>.json` | every version of one package, in Composer's minified form |
+| `bin/sync.php` | finds the new release tags of the given repositories and publishes them |
+| `bin/publish.php` | adds, withdraws, abandons or transfers one package's versions; the only writer of `p2/` |
+| `.github/workflows/sync.yml` | the sync, started by the action or by hand |
+| `.github/workflows/maintain.yml` | every other change to what is published |
+| `sync/action.yml` | what a package's release pipeline uses to start its sync and wait for it |
 
 The registry's own settings: the variable `REGISTRY_APP_ID` and the secret `REGISTRY_APP_KEY` (the
 App's private key). A workflow here can read every admitted repository through that key, so `main`
