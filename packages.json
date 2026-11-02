@@ -1,5 +1,5 @@
 {
-    "metadata-url": "/p2/%package%.json",
+    "metadata-url": "https://api.github.com/repos/andreapalladiokiv/composer-registry/contents/p2/%package%.json?ref=main",
     "available-packages": [
         "techork/saga",
         "techork/saga-laravel"

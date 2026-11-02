@@ -61,7 +61,7 @@ write($file, ['packages' => [$name => array_values($versions)]]);
 
 $available = array_map(static fn ($f) => substr($f, 3, -5), glob('p2/*/*.json'));
 sort($available);
-write('packages.json', ['metadata-url' => '/p2/%package%.json', 'available-packages' => $available]);
+write('packages.json', ['metadata-url' => 'https://api.github.com/repos/andreapalladiokiv/composer-registry/contents/p2/%package%.json?ref=main', 'available-packages' => $available]);
 
 echo "published $name $version from $repo@$sha\n";
 
