@@ -16,10 +16,9 @@ plus `composer config --global github-oauth.github.com <token>`.
 
 **Publish a new package**
 
-1. PR here adding `vendor/name: owner/repo` to `owners.yml`.
-2. A read-only deploy key on the package repository, its private half here as the secret
-   `DEPLOY_KEY_<OWNER>_<REPO>` (upper case, other characters `_`).
-3. In the package's release pipeline, on a `vX.Y.Z` tag:
+1. Admit the repository: a read-only deploy key on it, its private half here as the secret
+   `DEPLOY_KEY_<OWNER>_<REPO>` (upper case, other characters `_`). Only an admin of the registry can.
+2. In the package's release pipeline, on a `vX.Y.Z` tag:
 
    ```yaml
    - uses: andreapalladiokiv/composer-registry/publish@main
@@ -28,4 +27,5 @@ plus `composer config --global github-oauth.github.com <token>`.
    The token needs only Actions: write on this repository. The step fails when the registry refuses.
 
 Only this repository writes to itself: a request names a repository and a tag, and the registry reads
-the tag on its own. Published versions are immutable; withdrawing one is a PR removing it from `p2/`.
+the tag on its own. A package name belongs to the repository that first published it; moving it is a PR
+here rewriting its `p2/` file. Published versions are immutable; withdrawing one is a PR removing it from `p2/`.

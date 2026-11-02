@@ -1,4 +1,0 @@
-# Who may publish which package. A publish from any other repository is refused.
-# One name, one source repository: changing an owner is a pull request to this file.
-techork/saga: andreapalladiokiv/saga
-techork/saga-laravel: andreapalladiokiv/saga-laravel

@@ -2,9 +2,9 @@ name: publish
 run-name: publish ${{ inputs.repository }} ${{ inputs.tag }}
 
 # Started by the `publish` action from a package's release pipeline. Whatever asked only names a
-# repository and a tag: the registry checks the repository in owners.yml, reads the tag with its own
-# read-only deploy key for that repository, and writes p2/ with its own GITHUB_TOKEN. Nothing outside
-# this repository can write to it.
+# repository and a tag. A repository is admitted by its read-only deploy key being here, as the secret
+# DEPLOY_KEY_<OWNER>_<REPO>; the registry reads the tag with it and writes p2/ with its own
+# GITHUB_TOKEN. Nothing outside this repository can write to it.
 
 on:
   workflow_dispatch:
@@ -37,10 +37,18 @@ jobs:
           TAG: ${{ inputs.tag }}
         run: |
           [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || { echo "::error::$TAG is not a release tag"; exit 1; }
-          grep -qE "^[^#].*:[[:space:]]*${SOURCE//./\\.}[[:space:]]*$" owners.yml || { echo "::error::$SOURCE owns no package in owners.yml"; exit 1; }
           # The deploy key of a repository is the secret DEPLOY_KEY_<OWNER>_<REPO>, in upper case.
           echo "key=DEPLOY_KEY_$(tr 'a-z' 'A-Z' <<< "$SOURCE" | tr -c 'A-Z0-9\n' '_')" >> "$GITHUB_OUTPUT"
 
+      - name: Check the repository is admitted
+        env:
+          SOURCE: ${{ inputs.repository }}
+          ADMITTED: ${{ secrets[steps.request.outputs.key] != '' }}
+        run: |
+          [ "$ADMITTED" = true ] || { echo "::error::$SOURCE is not admitted: the registry has no ${{ steps.request.outputs.key }}"; exit 1; }
+
+      # The registry needs the tag's commit and its composer.json, nothing else: the dist is the source
+      # repository's zipball of that commit. One commit, one file, however large the package is.
       - name: Read the tag
         uses: actions/checkout@v5
         with:
@@ -49,6 +57,9 @@ jobs:
           ssh-key: ${{ secrets[steps.request.outputs.key] }}
           path: package
           persist-credentials: false
+          filter: blob:none
+          sparse-checkout: /composer.json
+          sparse-checkout-cone-mode: false
 
       - name: Publish
         env:
