@@ -2,9 +2,10 @@ name: publish
 run-name: publish ${{ inputs.repository }} ${{ inputs.tag }}
 
 # Started by the `publish` action from a package's release pipeline. Whatever asked only names a
-# repository and a tag. A repository is admitted by its read-only deploy key being here, as the secret
-# DEPLOY_KEY_<OWNER>_<REPO>; the registry reads the tag with it and writes p2/ with its own
-# GITHUB_TOKEN. Nothing outside this repository can write to it.
+# repository and a tag. A repository is admitted by the composer-registry-demo GitHub App being
+# installed on it: the registry reads the tag with a token the App issues for that repository alone,
+# read-only and short-lived, and writes p2/ with its own GITHUB_TOKEN. Nothing outside this repository
+# can write to it.
 
 on:
   workflow_dispatch:
@@ -34,18 +35,23 @@ jobs:
         id: request
         env:
           SOURCE: ${{ inputs.repository }}
+          OWNER: ${{ github.repository_owner }}
           TAG: ${{ inputs.tag }}
         run: |
           [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || { echo "::error::$TAG is not a release tag"; exit 1; }
-          # The deploy key of a repository is the secret DEPLOY_KEY_<OWNER>_<REPO>, in upper case.
-          echo "key=DEPLOY_KEY_$(tr 'a-z' 'A-Z' <<< "$SOURCE" | tr -c 'A-Z0-9\n' '_')" >> "$GITHUB_OUTPUT"
+          [[ "$SOURCE" == "$OWNER"/* ]] || { echo "::error::$SOURCE is outside $OWNER, where the App is installed"; exit 1; }
+          echo "name=${SOURCE#*/}" >> "$GITHUB_OUTPUT"
 
-      - name: Check the repository is admitted
-        env:
-          SOURCE: ${{ inputs.repository }}
-          ADMITTED: ${{ secrets[steps.request.outputs.key] != '' }}
-        run: |
-          [ "$ADMITTED" = true ] || { echo "::error::$SOURCE is not admitted: the registry has no ${{ steps.request.outputs.key }}"; exit 1; }
+      # Fails when the App is not installed on the repository: that is what "not admitted" means.
+      - name: Get a read token for the repository
+        id: token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.REGISTRY_APP_ID }}
+          private-key: ${{ secrets.REGISTRY_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ steps.request.outputs.name }}
+          permission-contents: read
 
       # The registry needs the tag's commit and its composer.json, nothing else: the dist is the source
       # repository's zipball of that commit. One commit, one file, however large the package is.
@@ -54,7 +60,7 @@ jobs:
         with:
           repository: ${{ inputs.repository }}
           ref: refs/tags/${{ inputs.tag }}
-          ssh-key: ${{ secrets[steps.request.outputs.key] }}
+          token: ${{ steps.token.outputs.token }}
           path: package
           persist-credentials: false
           filter: blob:none

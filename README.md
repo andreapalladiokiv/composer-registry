@@ -16,8 +16,8 @@ plus `composer config --global github-oauth.github.com <token>`.
 
 **Publish a new package**
 
-1. Admit the repository: a read-only deploy key on it, its private half here as the secret
-   `DEPLOY_KEY_<OWNER>_<REPO>` (upper case, other characters `_`). Only an admin of the registry can.
+1. Admit the repository: add it to the installation of the `composer-registry-demo` GitHub App
+   (Contents: read). Removing it there withdraws the admission; what it published stays.
 2. In the package's release pipeline, on a `vX.Y.Z` tag:
 
    ```yaml
