@@ -6,6 +6,7 @@ declare(strict_types=1);
  * Adds one version of one package to the registry.
  *
  *   php bin/publish.php <source-repo> <version> <commit-sha> <path/to/composer.json>
+ *   php bin/publish.php --index-only     # rebuild packages.json from p2/, e.g. after a rebase conflict
  *
  * The package name comes from the composer.json. A name belongs to the repository that first
  * published it: a version of it from any other repository is refused. A version already published is
@@ -24,7 +25,6 @@ if ($manifestPath === null || ! preg_match('/^\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$/',
     fail('usage: php bin/publish.php <owner/repo> <X.Y.Z> <sha> <composer.json>');
 }
 
-chdir(dirname(__DIR__));
 $manifest = json_decode(file_get_contents($manifestPath), true, flags: JSON_THROW_ON_ERROR);
 $name = $manifest['name'] ?? fail('composer.json has no name');
 

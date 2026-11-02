@@ -1,9 +1,13 @@
 # Composer registry (demo)
 
-Metadata only: each version points at a zipball of its own source repository, so who may install a
-package is whoever may read that repository.
+A Composer repository for packages released from their own GitHub repositories. It holds metadata
+only: every version points at the zipball of its source repository at the released commit, so whoever
+may read a package's repository may install it, and nobody else.
 
-**Consume**
+Only this repository writes to itself. A package's pipeline asks for a release by naming its
+repository and a tag; the registry reads that tag on its own and decides what to publish.
+
+## Install packages from it
 
 ```json
 "repositories": [{
@@ -12,20 +16,86 @@ package is whoever may read that repository.
   "options": {"http": {"header": ["Accept: application/vnd.github.raw"]}}
 }]
 ```
-plus `composer config --global github-oauth.github.com <token>`.
 
-**Publish a new package**
+and a token that can read this repository and the packages' repositories:
+`composer config --global github-oauth.github.com <token>` (in CI, `COMPOSER_AUTH`).
 
-1. Admit the repository: add it to the installation of the `composer-registry-demo` GitHub App
-   (Contents: read). Removing it there withdraws the admission; what it published stays.
-2. In the package's release pipeline, on a `vX.Y.Z` tag:
+The contents API is used rather than `raw.githubusercontent.com` because Composer sends its GitHub
+token only to GitHub's own hosts; a private registry on `raw.githubusercontent.com` answers 404.
+
+## Release a package through it
+
+### Once per repository
+
+1. **Admit it.** Add the repository to the installation of the `composer-registry-demo` GitHub App
+   (Settings → Applications → composer-registry-demo → Configure → Repository access). The App has
+   Contents: read and nothing else. Removing a repository from the installation withdraws it; what it
+   already published stays.
+2. **Give its pipeline a trigger token** as the secret `COMPOSER_REGISTRY_TOKEN`: a fine-grained token
+   with access to `composer-registry` only and Actions: read and write. It can start the registry's
+   workflow and nothing more.
+3. **Add the release workflow:**
 
    ```yaml
-   - uses: andreapalladiokiv/composer-registry/publish@main
-     with: { token: ${{ secrets.COMPOSER_REGISTRY_TOKEN }} }
+   # .github/workflows/release.yml
+   name: Release
+   on:
+     push:
+       tags: ['v*']
+     workflow_dispatch:   # gh workflow run release.yml --ref vX.Y.Z publishes an existing tag
+   jobs:
+     publish:
+       runs-on: ubuntu-latest
+       steps:
+         - uses: andreapalladiokiv/composer-registry/publish@main
+           with:
+             token: ${{ secrets.COMPOSER_REGISTRY_TOKEN }}
    ```
-   The token needs only Actions: write on this repository. The step fails when the registry refuses.
 
-Only this repository writes to itself: a request names a repository and a tag, and the registry reads
-the tag on its own. A package name belongs to the repository that first published it; moving it is a PR
-here rewriting its `p2/` file. Published versions are immutable; withdrawing one is a PR removing it from `p2/`.
+The package itself needs a `composer.json` at the root of the tag, with a `name` and without a
+`version`. A monorepo releases each package under a tag whose tree is that package's directory
+(for example `saga/v1.2.0`) and calls the action once per such tag with `tag:` set.
+
+### Every release
+
+Push a `vX.Y.Z` tag. The first release of a name is no different from the ones after it.
+
+```
+package repo: tag pushed → release.yml → publish action
+  └─ starts publish.yml here with repository + tag, waits for that run; its result is the release's
+
+registry: publish.yml
+  1. the tag looks like vX.Y.Z or <package>/vX.Y.Z, the repository is under this account
+  2. the App issues a token for that repository alone, Contents: read, one hour  (not installed → refused)
+  3. checks out the tag sparse: its commit and composer.json, nothing else
+  4. bin/publish.php writes p2/<vendor>/<name>.json and packages.json
+  5. commits with its own GITHUB_TOKEN; a push that lost a race rebases and retries
+```
+
+### What the registry refuses
+
+| Request | Result |
+|---|---|
+| A repository the App is not installed on | refused: not admitted |
+| A tag that is not `vX.Y.Z` or `<package>/vX.Y.Z` | refused |
+| A name first published from another repository | refused: the name belongs to that one |
+| A published version, from a different commit | refused: versions are immutable |
+| A published version, from the same commit | accepted, nothing changes |
+
+Tags that existed before a repository was admitted are published the same way, one dispatch per tag:
+`gh workflow run release.yml --ref vX.Y.Z` in the package, or here, with rights on this repository:
+`gh workflow run publish.yml -f repository=owner/repo -f tag=vX.Y.Z`.
+
+## Maintaining it
+
+Changes go through pull requests to `main`:
+
+- **withdraw a version:** remove it from its `p2/` file;
+- **hand a name to another repository:** rewrite `source.url` and `dist.url` of its versions;
+- **mark a package abandoned:** set `"abandoned": true` (or the replacing package's name) on its versions.
+
+Run `php bin/publish.php --index-only` after editing `p2/` by hand to rebuild `packages.json`.
+
+The registry's own settings: the variable `REGISTRY_APP_ID` and the secret `REGISTRY_APP_KEY` (the
+App's private key). A workflow here can read every admitted repository through that key, so `main`
+should only change through reviewed pull requests, and secrets only by its admins.

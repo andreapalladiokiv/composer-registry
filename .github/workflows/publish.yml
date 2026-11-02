@@ -38,7 +38,8 @@ jobs:
           OWNER: ${{ github.repository_owner }}
           TAG: ${{ inputs.tag }}
         run: |
-          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || { echo "::error::$TAG is not a release tag"; exit 1; }
+          # vX.Y.Z, or <package>/vX.Y.Z for a package of a monorepo.
+          [[ "$TAG" =~ ^([a-z0-9._-]+/)?v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || { echo "::error::$TAG is not a release tag"; exit 1; }
           [[ "$SOURCE" == "$OWNER"/* ]] || { echo "::error::$SOURCE is outside $OWNER, where the App is installed"; exit 1; }
           echo "name=${SOURCE#*/}" >> "$GITHUB_OUTPUT"
 
@@ -73,12 +74,13 @@ jobs:
           TAG: ${{ inputs.tag }}
         run: |
           sha=$(git -C package rev-parse HEAD)
-          php bin/publish.php "$SOURCE" "${TAG#v}" "$sha" package/composer.json
+          version="${TAG##*/}"; version="${version#v}"
+          php bin/publish.php "$SOURCE" "$version" "$sha" package/composer.json
           git config user.name composer-registry
           git config user.email composer-registry@users.noreply.github.com
           git add p2 packages.json
           git diff --cached --quiet && { echo "already published"; exit 0; }
-          git commit -q -m "Publish $(jq -r .name package/composer.json) ${TAG#v} from $SOURCE"
+          git commit -q -m "Publish $(jq -r .name package/composer.json) $version from $SOURCE"
           for attempt in 1 2 3 4 5; do
             git push -q && exit 0
             git fetch -q origin main
