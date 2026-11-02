@@ -1,0 +1,59 @@
+name: Publish to the Composer registry
+
+# Called from a package's own repository when it pushes a release tag:
+#
+#   on: { push: { tags: ['v*'] } }
+#   jobs:
+#     publish:
+#       uses: andreapalladiokiv/composer-registry/.github/workflows/publish.yml@main
+#       secrets: { REGISTRY_DEPLOY_KEY: ${{ secrets.REGISTRY_DEPLOY_KEY }} }
+#
+# The caller is github.repository; owners.yml decides which names it may publish.
+
+on:
+  workflow_call:
+    inputs:
+      path:
+        description: Directory of the package inside the caller's repository
+        type: string
+        default: .
+    secrets:
+      REGISTRY_DEPLOY_KEY:
+        required: true
+
+concurrency:
+  group: composer-registry
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the package
+        uses: actions/checkout@v4
+        with:
+          path: package
+
+      - name: Check out the registry
+        uses: actions/checkout@v4
+        with:
+          repository: andreapalladiokiv/composer-registry
+          ssh-key: ${{ secrets.REGISTRY_DEPLOY_KEY }}
+          path: registry
+
+      - name: Publish
+        env:
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          TAG: ${{ github.ref_name }}
+          DIR: ${{ inputs.path }}
+        run: |
+          version="${TAG##*/v}"; version="${version#v}"
+          cd registry
+          php bin/publish.php "$REPO" "$version" "$SHA" "$GITHUB_WORKSPACE/package/$DIR/composer.json"
+          git config user.name composer-registry
+          git config user.email composer-registry@users.noreply.github.com
+          git add p2 packages.json
+          git diff --cached --quiet && exit 0
+          git commit -q -m "Publish $(jq -r .name "$GITHUB_WORKSPACE/package/$DIR/composer.json") $version from $REPO"
+          for i in 1 2 3; do git push && exit 0; git pull --rebase -q; done; exit 1

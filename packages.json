@@ -1,0 +1,7 @@
+{
+    "metadata-url": "/p2/%package%.json",
+    "available-packages": [
+        "techork/saga",
+        "techork/saga-laravel"
+    ]
+}
