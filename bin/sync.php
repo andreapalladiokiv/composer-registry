@@ -83,7 +83,9 @@ exit($refused === [] ? 0 : 1);
 function release_tags(string $repository, string $token): array
 {
     $auth = base64_encode("x-access-token:$token");
-    exec(sprintf('git -c http.extraHeader=%s ls-remote --tags %s 2>&1', escapeshellarg("Authorization: Basic $auth"), escapeshellarg("https://github.com/$repository.git")), $lines, $status);
+    // Outside the registry's working tree: actions/checkout leaves its own token there as an extraheader
+    // for github.com, which would be sent instead of this one.
+    exec(sprintf('git -C %s -c http.extraHeader=%s ls-remote --tags %s 2>&1', escapeshellarg(sys_get_temp_dir()), escapeshellarg("Authorization: Basic $auth"), escapeshellarg("https://github.com/$repository.git")), $lines, $status);
     if ($status !== 0) {
         fail("cannot list the tags of $repository: ".implode(' ', $lines));
     }
