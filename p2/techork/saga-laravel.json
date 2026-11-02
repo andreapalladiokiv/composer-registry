@@ -17,6 +17,50 @@
                     "illuminate/queue": "^11.0 || ^12.0 || ^13.0",
                     "illuminate/support": "^11.0 || ^12.0 || ^13.0",
                     "php": "^8.4",
+                    "techork/saga": "^0.35"
+                },
+                "autoload": {
+                    "psr-4": {
+                        "Techork\\Saga\\Laravel\\": "src/"
+                    }
+                },
+                "extra": {
+                    "laravel": {
+                        "providers": [
+                            "Techork\\Saga\\Laravel\\SagaServiceProvider"
+                        ]
+                    }
+                },
+                "version": "0.35.0",
+                "version_normalized": "0.35.0.0",
+                "source": {
+                    "type": "git",
+                    "url": "https://github.com/andreapalladiokiv/saga-laravel.git",
+                    "reference": "57cf62c5065e1e72043213ec6269b2b211005c06"
+                },
+                "dist": {
+                    "type": "zip",
+                    "url": "https://api.github.com/repos/andreapalladiokiv/saga-laravel/zipball/57cf62c5065e1e72043213ec6269b2b211005c06",
+                    "reference": "57cf62c5065e1e72043213ec6269b2b211005c06"
+                },
+                "time": "2026-11-02T09:59:59+00:00"
+            },
+            {
+                "name": "techork/saga-laravel",
+                "description": "Laravel bridge for techork/saga: database state repository, queue, cache lock, encrypted subject codec, event dispatcher adapter, the service provider and the make:saga generator",
+                "type": "library",
+                "license": "proprietary",
+                "require": {
+                    "illuminate/bus": "^11.0 || ^12.0 || ^13.0",
+                    "illuminate/cache": "^11.0 || ^12.0 || ^13.0",
+                    "illuminate/console": "^11.0 || ^12.0 || ^13.0",
+                    "illuminate/contracts": "^11.0 || ^12.0 || ^13.0",
+                    "illuminate/database": "^11.0 || ^12.0 || ^13.0",
+                    "illuminate/encryption": "^11.0 || ^12.0 || ^13.0",
+                    "illuminate/events": "^11.0 || ^12.0 || ^13.0",
+                    "illuminate/queue": "^11.0 || ^12.0 || ^13.0",
+                    "illuminate/support": "^11.0 || ^12.0 || ^13.0",
+                    "php": "^8.4",
                     "techork/saga": "^0.34"
                 },
                 "autoload": {
