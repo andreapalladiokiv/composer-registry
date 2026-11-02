@@ -88,13 +88,15 @@ Tags that existed before a repository was admitted are published the same way, o
 
 ## Maintaining it
 
-Changes go through pull requests to `main`:
+A `p2/` file is in Composer's minified form: the newest version is whole and every older one holds
+only what differs from the one before it. Removing or editing a version by hand corrupts the ones
+after it, so changes go through `bin/publish.php`, in a pull request to `main`:
 
-- **withdraw a version:** remove it from its `p2/` file;
-- **hand a name to another repository:** rewrite `source.url` and `dist.url` of its versions;
-- **mark a package abandoned:** set `"abandoned": true` (or the replacing package's name) on its versions.
+- **withdraw a version:** `php bin/publish.php --withdraw vendor/name X.Y.Z`. A withdrawn version is
+  gone from the registry, so it could be published again, from any commit: withdraw rarely;
+- **rebuild `packages.json`:** `php bin/publish.php --index-only`.
 
-Run `php bin/publish.php --index-only` after editing `p2/` by hand to rebuild `packages.json`.
+Handing a name to another repository or marking a package abandoned has no command yet.
 
 The registry's own settings: the variable `REGISTRY_APP_ID` and the secret `REGISTRY_APP_KEY` (the
 App's private key). A workflow here can read every admitted repository through that key, so `main`
