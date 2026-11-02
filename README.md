@@ -4,8 +4,8 @@ A Composer repository for packages released from their own GitHub repositories. 
 only: every version points at the zipball of its source repository at the released commit, so whoever
 may read a package's repository may install it, and nobody else.
 
-Only this repository writes to itself. A package's pipeline asks for a release by naming its
-repository and a tag; the registry reads that tag on its own and decides what to publish.
+Only this repository writes to itself. It reads the release tags of the repositories it is allowed to
+read and publishes them; package repositories take no part.
 
 ## Install packages from it
 
@@ -27,64 +27,39 @@ token only to GitHub's own hosts; a private registry on `raw.githubusercontent.c
 
 ### Once per repository
 
-1. **Admit it.** Add the repository to the installation of the `composer-registry-demo` GitHub App
-   (Settings → Applications → composer-registry-demo → Configure → Repository access). The App has
-   Contents: read and nothing else. Removing a repository from the installation withdraws it; what it
-   already published stays.
-2. **Give its pipeline a trigger token** as the secret `COMPOSER_REGISTRY_TOKEN`: a fine-grained token
-   with access to `composer-registry` only and Actions: read and write. It can start the registry's
-   workflow and nothing more.
-3. **Add the release workflow:**
+**Admit it:** add the repository to the installation of the `composer-registry-demo` GitHub App
+(Settings → Applications → composer-registry-demo → Configure → Repository access). The App has
+Contents: read and nothing else. That is all: the package repository runs no workflow and holds no
+token. Removing it from the installation withdraws it; what it already published stays.
 
-   ```yaml
-   # .github/workflows/release.yml
-   name: Release
-   on:
-     push:
-       tags: ['v*']
-     workflow_dispatch:   # gh workflow run release.yml --ref vX.Y.Z publishes an existing tag
-   jobs:
-     publish:
-       runs-on: ubuntu-latest
-       steps:
-         - uses: andreapalladiokiv/composer-registry/publish@main
-           with:
-             token: ${{ secrets.COMPOSER_REGISTRY_TOKEN }}
-   ```
-
-The package itself needs a `composer.json` at the root of the tag, with a `name` and without a
-`version`. A monorepo releases each package under a tag whose tree is that package's directory
-(for example `saga/v1.2.0`) and calls the action once per such tag with `tag:` set.
+The package needs a `composer.json` at the root of the tag, with a `name` and without a `version`. A
+monorepo releases each package under a tag whose tree is that package's directory, e.g. `saga/v1.2.0`.
 
 ### Every release
 
-Push a `vX.Y.Z` tag. The first release of a name is no different from the ones after it.
+Push a tag `vX.Y.Z` (or `<package>/vX.Y.Z`). The `sync` workflow here publishes it, every 30 minutes
+or at once with `gh workflow run sync.yml -R andreapalladiokiv/composer-registry` (`-f repository=…`
+for one repository). The first sync after admission publishes every release tag the repository already
+has.
 
 ```
-package repo: tag pushed → release.yml → publish action
-  └─ starts publish.yml here with repository + tag, waits for that run; its result is the release's
-
-registry: publish.yml
-  1. the tag looks like vX.Y.Z or <package>/vX.Y.Z, the repository is under this account
-  2. the App issues a token for that repository alone, Contents: read, one hour  (not installed → refused)
-  3. checks out the tag sparse: its commit and composer.json, nothing else
-  4. bin/publish.php writes p2/<vendor>/<name>.json and packages.json
-  5. commits with its own GITHUB_TOKEN; a push that lost a race rebases and retries
+sync.yml (schedule or dispatch)
+  1. the App issues a read-only token for every repository it is installed on
+  2. per repository, one tag listing; tags whose commit the registry already holds are skipped
+  3. per new tag: composer.json at the tag → bin/publish.php → p2/<vendor>/<name>.json
+  4. one commit for the whole sync
 ```
 
 ### What the registry refuses
 
-| Request | Result |
-|---|---|
-| A repository the App is not installed on | refused: not admitted |
-| A tag that is not `vX.Y.Z` or `<package>/vX.Y.Z` | refused |
-| A name first published from another repository | refused: the name belongs to that one |
-| A published version, from a different commit | refused: versions are immutable |
-| A published version, from the same commit | accepted, nothing changes |
+A refused tag is skipped, reported as a warning, and leaves the run red; the rest of the sync goes on.
 
-Tags that existed before a repository was admitted are published the same way, one dispatch per tag:
-`gh workflow run release.yml --ref vX.Y.Z` in the package, or here, with rights on this repository:
-`gh workflow run publish.yml -f repository=owner/repo -f tag=vX.Y.Z`.
+| Tag | Result |
+|---|---|
+| no `composer.json` at the tag | refused |
+| a name first published from another repository | refused: the name belongs to that one |
+| a published version, moved to a different commit | refused: versions are immutable |
+| a tag that is not `vX.Y.Z` or `<package>/vX.Y.Z` | ignored |
 
 ## Maintaining it
 
