@@ -2,8 +2,8 @@
     "name": "techork/composer-registry",
     "homepage": "https://api.github.com/repos/andreapalladiokiv/composer-registry/contents",
     "repositories": [
-        {"type": "vcs", "url": "https://github.com/andreapalladiokiv/saga", "name": "techork/saga"},
-        {"type": "vcs", "url": "https://github.com/andreapalladiokiv/saga-laravel", "name": "techork/saga-laravel"}
+        {"type": "vcs", "url": "git@github.com:andreapalladiokiv/saga.git", "no-api": true, "name": "techork/saga"},
+        {"type": "vcs", "url": "git@github.com:andreapalladiokiv/saga-laravel.git", "no-api": true, "name": "techork/saga-laravel"}
     ],
     "require-all": true,
     "minimum-stability": "stable",

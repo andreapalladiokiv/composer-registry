@@ -5,10 +5,11 @@ declare(strict_types=1);
 /*
  * Decides whether a fresh Satis build may replace what is published.
  *
- *   GH_TOKEN=… php bin/check.php <satis.json> <published-dir> <built-dir>
+ *   DEPLOY_KEYS=<dir> GIT_SSH_COMMAND=bin/ssh GIT_SSH_VARIANT=ssh \
+ *     php bin/check.php <satis.json> <published-dir> <built-dir>
  *
- * GH_TOKEN reads the tags of the repositories in satis.json (git ls-remote, outside the REST API's rate
- * limit). Composer's own version parser comes from vendor/, after composer install.
+ * It lists the tags of the repositories in satis.json with git over SSH, with the same deploy keys as
+ * the build (bin/ssh). Composer's own version parser comes from vendor/, after composer install.
  *
  * Every repository in satis.json names the one package it publishes ("name"), under one of the
  * "available-package-patterns", and no two repositories name the same package. Whatever a repository's
@@ -34,7 +35,6 @@ use Composer\Package\BasePackage;
 use Composer\Semver\Constraint\Constraint;
 use Composer\Semver\VersionParser;
 
-$token = getenv('GH_TOKEN') ?: fail('GH_TOKEN is not set');
 [, $configFile, $publishedDir, $builtDir] = $argv + [null, null, null, null];
 $builtDir !== null || fail('usage: php bin/check.php <satis.json> <published-dir> <built-dir>');
 
@@ -52,7 +52,7 @@ $changes = [];
 // The package each listed repository publishes: owner/repo => vendor/name.
 $packageOf = [];
 foreach ($config['repositories'] as $listed) {
-    $repository = strtolower(preg_replace(['#^https://github\.com/#', '#(\.git)?/?$#'], '', $listed['url']));
+    $repository = owner_repo($listed['url']);
     $name = $listed['name'] ?? null;
     if ($name === null) {
         $errors[] = "$repository has no \"name\" in satis.json: every repository names the one package it publishes";
@@ -87,7 +87,7 @@ foreach ($built as $name => $versions) {
 // Every release tag of every listed repository is in the build, at its commit, or blacklisted.
 foreach ($packageOf as $repository => $name) {
     $seen = [];
-    foreach (tags($repository, $token) as $tag => $sha) {
+    foreach (tags($repository) as $tag => $sha) {
         try {
             $normalized = $parser->normalize($tag);
         } catch (UnexpectedValueException) {
@@ -180,23 +180,23 @@ function read_registry(string $dir): array
     return $packages;
 }
 
-/** owner/repo of the version's source, however the URL is spelled */
+/** owner/repo of the version's source */
 function repository(array $version): string
 {
-    return strtolower(preg_replace(['#^(?:https://github\.com/|git@github\.com:)#', '#\.git$#'], '', $version['source']['url']));
+    return owner_repo($version['source']['url']);
+}
+
+/** owner/repo of a GitHub repository URL, however it is spelled */
+function owner_repo(string $url): string
+{
+    return strtolower(preg_replace(['#^(?:https://github\.com/|git@github\.com:)#', '#(\.git)?/?$#'], '', $url));
 }
 
 /** @return array<string, string> tag => commit, annotated tags peeled */
-function tags(string $repository, string $token): array
+function tags(string $repository): array
 {
-    $auth = base64_encode("x-access-token:$token");
-    // Outside any working tree, whose own credentials git would send instead.
-    exec(sprintf(
-        'git -C %s -c http.extraHeader=%s ls-remote --tags %s 2>&1',
-        escapeshellarg(sys_get_temp_dir()),
-        escapeshellarg("Authorization: Basic $auth"),
-        escapeshellarg("https://github.com/$repository.git"),
-    ), $lines, $status);
+    getenv('GIT_SSH_COMMAND') ?: fail('GIT_SSH_COMMAND is not set: the tags are read with the deploy keys, through bin/ssh');
+    exec(sprintf('git ls-remote --tags %s 2>&1', escapeshellarg("git@github.com:$repository.git")), $lines, $status);
     $status === 0 || fail("cannot list the tags of $repository: ".implode(' ', $lines));
 
     $tags = [];

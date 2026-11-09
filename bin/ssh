@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+#
+# GIT_SSH_COMMAND for the build: every package repository is read with its own deploy key.
+#
+#   DEPLOY_KEYS=<dir> GIT_SSH_COMMAND=bin/ssh GIT_SSH_VARIANT=ssh git ls-remote git@github.com:owner/repo.git
+#
+# GIT_SSH_VARIANT=ssh tells git it is OpenSSH, so it does not first probe the command with `ssh -G`.
+#
+# git runs  ssh [options] git@github.com "git-upload-pack 'owner/repo.git'". This takes the key
+# <dir>/owner/repo (lowercase) for that repository and refuses when there is none, so a repository is
+# read only with the key its admins added to it. Only reading is let through, and only to GitHub, whose
+# host keys are pinned in bin/known_hosts.
+
+set -euo pipefail
+
+command=${!#}
+repository=$(sed -nE "s#^git-upload-pack '/?([^']+)'\$#\1#p" <<< "$command")
+repository=${repository%.git}
+key="${DEPLOY_KEYS:?DEPLOY_KEYS is not set}/${repository,,}"
+
+if [ -z "$repository" ]; then
+    echo "bin/ssh: only reading a repository is allowed, not: $command" >&2
+    exit 1
+fi
+if [ ! -f "$key" ]; then
+    echo "bin/ssh: no deploy key for $repository" >&2
+    exit 1
+fi
+
+exec ssh -i "$key" -o IdentitiesOnly=yes -o IdentityAgent=none -o BatchMode=yes \
+    -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$(dirname "$0")/known_hosts" "$@"

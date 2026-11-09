@@ -14,7 +14,7 @@ package repository                         composer-registry
 ──────────────────                         ─────────────────
 push tag v1.2.3
   └─ release.yml ─ sync action ──────────▶ build.yml (workflow_dispatch)
-       waits for the build                   1. Satis reads every listed repository (reader App, read-only)
+       waits for the build                   1. Satis reads every listed repository (its deploy key, read-only)
        red if the build is refused           2. bin/check.php: may this build replace what is published?
                                              3. commits packages.json and p2/ to main
 ```
@@ -50,18 +50,29 @@ and a GitHub token that can read this repository and the packages' repositories:
 
 ### Once per repository
 
-1. **Let the registry read it.** An organization owner adds the repository to the installation of the
-   reader App (Settings → GitHub Apps → reader App → Configure → Repository access → Only select
-   repositories). The App can read contents and nothing else.
+1. **Let the registry read it: a deploy key.** A key pair for this repository alone (GitHub accepts a
+   deploy key on one repository only):
+
+   ```bash
+   ssh-keygen -t ed25519 -N '' -C composer-registry -f saga
+   ```
+
+   - an admin of the **package repository** adds `saga.pub` under Settings → Deploy keys, *without* write
+     access. This is the repository letting the registry in; removing the key shuts it out again;
+   - an admin of **this repository** adds the private key `saga` as the secret `DEPLOY_KEY_SAGA` of the
+     environment `registry`: the repository's name in capitals, `-` and `.` as `_`. Then deletes both
+     files.
+
 2. **Admit it, under its name.** A pull request adding it to `repositories` in `satis.json`:
 
    ```json
-   {"type": "vcs", "url": "https://github.com/andreapalladiokiv/saga", "name": "techork/saga"}
+   {"type": "vcs", "url": "git@github.com:andreapalladiokiv/saga.git", "no-api": true, "name": "techork/saga"}
    ```
 
-   `name` is the one package this repository may publish. The name in its `composer.json` must match;
-   whatever it says, nothing else is published from it. The build after the merge publishes every release
-   tag the repository already has.
+   The SSH URL and `"no-api": true` make Satis read the repository with git and its deploy key, not
+   through the GitHub API. `name` is the one package this repository may publish: the name in its
+   `composer.json` must match, and whatever it says, nothing else is published from it. The build after
+   the merge publishes every release tag the repository already has.
 3. **Add the release workflow:**
 
    ```yaml
@@ -109,7 +120,8 @@ until the cause is dealt with.
 | would publish from a repository anything but its `name` in `satis.json` | a repository publishes its own package only | fixing the `name` in its `composer.json` |
 | leaves out a release tag (no or invalid `composer.json`, a version that contradicts the tag) | Satis skips such a tag silently; the build log, with `-vv`, says why | fixing the tag's `composer.json` and releasing a new version, or blacklisting the version |
 | would point a published version at another commit (a moved or recreated tag) | versions are immutable | restoring the tag; release a new version instead |
-| would lose a published version (a deleted tag, a repository removed from `satis.json` or from the App) | what is published stays installable | restoring it, or withdrawing it on purpose |
+| would lose a published version (a deleted tag, a repository removed from `satis.json`) | what is published stays installable | restoring it, or withdrawing it on purpose |
+| cannot read a listed repository (no `DEPLOY_KEY_…` secret, or the deploy key removed from the repository) | the build would not know what it holds | restoring the key, or withdrawing the package on purpose |
 | runs on a `satis.json` with a repository without `name`, two repositories with one `name`, or a `name` outside `techork/*` | — | fixing `satis.json` |
 
 ## Maintaining it
@@ -121,8 +133,8 @@ history of `p2/` what the build then published. `p2/` and `packages.json` are wr
 |---|---|
 | withdraw a version | `"blacklist": {"techork/name": "1.2.3"}`; any constraint works: `"1.2.*"`, `"*"` for every version. It stays withdrawn while it is listed |
 | mark a package abandoned | `"abandoned": {"techork/name": true}` or `"techork/replacement"`; Composer warns on install |
-| move a package to another repository | its `url`; refused unless the new repository has every published version at the same commit. The reader App must be installed on the new one |
-| stop publishing a repository | remove it from `repositories` and blacklist its package with `"*"` |
+| move a package to another repository | its `url`; refused unless the new repository has every published version at the same commit. The new repository needs a deploy key of its own |
+| stop publishing a repository | remove it from `repositories` and blacklist its package with `"*"`; then remove its deploy key and its secret |
 | rename a package | admit the new name as a new package and abandon the old one for it: published names never change |
 
 ## Who can do what
@@ -132,9 +144,9 @@ history of `p2/` what the build then published. `p2/` and `packages.json` are wr
 | install a package | read on this repository (metadata) and on the package's repository (zipball) | repository access |
 | release a version of package X | to push a `v*` tag to X's repository | X's tag ruleset |
 | publish name Y from repository X | nobody can, unless `satis.json` names Y for X | `name` in `satis.json`, `bin/check.php` |
-| let the registry read a repository | to manage the reader App's installation | organization owners |
+| let the registry read a repository | the package repository's admins add its deploy key; this repository's admins add the private key as a secret | both repositories' admins: no organization owner is involved |
 | admit a repository, withdraw, abandon, move | a merged pull request to `satis.json` | the review rules of `main` |
-| write the registry | only the build workflow, on `main` | its `GITHUB_TOKEN`; the reader key reaches `main` only |
+| write the registry | only the build workflow, on `main` | its `GITHUB_TOKEN`; the deploy keys reach `main` only, and the job holding them writes nothing |
 | start a build | the trigger App's key | an extra build is the worst it can do: what a build publishes comes from `satis.json` and the tags it reads itself |
 
 Read access to this repository shows the metadata of every package — names, versions, requirements — also
@@ -142,17 +154,21 @@ to someone who cannot read a package's sources.
 
 ## Setting it up
 
-Once, by the organization's owners and this repository's admins.
+Once. Reading the packages needs nobody but repository admins; only the trigger App needs an
+organization owner, once.
 
-**The reader App** reads the packages' repositories for the build.
+**The environment `registry`** of this repository holds the deploy keys, one secret per package
+repository (`DEPLOY_KEY_…`, see [Once per repository](#once-per-repository)).
 
-- Repository permissions: Contents: Read-only (Metadata: Read-only comes with it). Nothing else; no
-  webhook.
-- Installed on the package repositories only (Only select repositories).
-- Its client ID as the variable `REGISTRY_READER_CLIENT_ID` and a private key as the secret
-  `REGISTRY_READER_KEY` of the **environment `registry`** of this repository, whose deployment branches are
-  limited to `main`. Not as repository secrets: any workflow on any branch gets those, so anyone who can
-  push a branch here could read every repository the App is installed on.
+- Settings → Environments → `registry` → Deployment branches and tags → Selected branches and tags →
+  `main`. Before the first key goes in: the build created the environment without that limit. Not
+  repository secrets either: any workflow on any branch gets those, so anyone who can push a branch here
+  could read the packages' sources.
+- An environment holds up to 100 secrets, so up to 100 package repositories this way.
+- Nothing the build reads is cached: Satis's git mirrors are the packages' sources, and a cache saved on
+  `main` can be restored on any branch.
+- `bin/ssh` uses each repository's own key and lets git only read, only from GitHub, whose host keys are
+  pinned in `bin/known_hosts` (from `gh api meta`; GitHub rotates them rarely and announces it).
 
 **The trigger App** lets the packages' release workflows start the build.
 
@@ -172,10 +188,10 @@ Once, by the organization's owners and this repository's admins.
 ```bash
 composer install
 
-# A build and its check, as the workflow runs them. A clean COMPOSER_HOME keeps a global GitHub token
-# out of it; any token that can read the packages' repositories will do.
-export COMPOSER_HOME=$(mktemp -d) GH_TOKEN=$(gh auth token)
-export COMPOSER_AUTH="{\"github-oauth\":{\"github.com\":\"$GH_TOKEN\"}}"
+# A build and its check. The workflow reads with the deploy keys (DEPLOY_KEYS=<dir>, GIT_SSH_COMMAND=bin/ssh);
+# locally your own SSH access to the packages' repositories will do. A clean COMPOSER_HOME keeps a global
+# configuration out of it.
+export COMPOSER_HOME=$(mktemp -d) GIT_SSH_COMMAND=ssh GIT_SSH_VARIANT=ssh
 composer satis:build satis.json _build --minify -vv
 php bin/check.php satis.json . _build
 ```
@@ -189,9 +205,10 @@ Update it on purpose, `composer update composer/satis`, in a pull request of its
 |---|---|
 | `satis.json` | the repositories, the package each one publishes, and every decision about what is published |
 | `bin/check.php` | what a build may not change about what is published |
+| `bin/ssh`, `bin/known_hosts` | how the build reaches the repositories: each with its own deploy key, read-only, GitHub only |
 | `composer.json`, `composer.lock` | Satis, as a Composer plugin (`composer satis:build`) |
 | `packages.json`, `p2/` | written by the build: the entry point, and every version of each package in Composer's minified form |
-| `.github/workflows/build.yml` | builds with Satis and checks (job `build`: the reader key, read-only), then commits (job `publish`: write, no key) |
+| `.github/workflows/build.yml` | builds with Satis and checks (job `build`: the deploy keys, read-only), then commits (job `publish`: write, no key) |
 | `sync/action.yml` | what a package's release workflow uses to start the build and wait for it |
 
 The `homepage` in `satis.json` is not a homepage: Satis turns its path into `metadata-url`, which Composer
