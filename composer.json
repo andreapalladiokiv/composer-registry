@@ -1,0 +1,21 @@
+{
+    "name": "techork/composer-registry",
+    "description": "Builds the organization's Composer registry with Satis",
+    "type": "project",
+    "license": "proprietary",
+    "require": {
+        "php": "^8.4",
+        "composer/satis": "4.x-dev"
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true,
+    "config": {
+        "allow-plugins": {
+            "composer/satis": true
+        },
+        "platform": {
+            "php": "8.4.0"
+        },
+        "sort-packages": true
+    }
+}
