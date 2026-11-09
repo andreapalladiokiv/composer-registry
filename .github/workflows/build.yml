@@ -1,0 +1,161 @@
+name: build
+run-name: build${{ inputs.repository && format(' for {0}', inputs.repository) || '' }}
+
+# Builds packages.json and p2/ with Satis from every repository in satis.json, checks the result against
+# what is published (bin/check.php), and commits it. Started by a package's release (sync/action.yml), by
+# a change to what decides the build, every night as a safety net, and by hand.
+
+on:
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: The repository whose release asked for this build (shown only; a build covers every repository)
+        default: ''
+  push:
+    branches: [main]
+    paths: [satis.json, composer.lock, bin/check.php, .github/workflows/build.yml]
+  schedule:
+    - cron: '17 3 * * *'
+
+permissions: {}
+
+# One build at a time. Of several waiting, GitHub keeps only the newest; that loses nothing, since every
+# build is complete.
+concurrency:
+  group: build
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # Reads the packages' repositories. Holds the reader App's key, so it gets nothing that writes.
+  build:
+    runs-on: ubuntu-latest
+    # Holds REGISTRY_READER_CLIENT_ID and REGISTRY_READER_KEY; its deployment branches are limited to main.
+    environment: registry
+    permissions:
+      contents: read
+    steps:
+      # main as it is now, not the commit that started the run: a build that waited behind another must be
+      # checked against what that one published, and built from the latest satis.json.
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          persist-credentials: false
+
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: '8.4'
+          extensions: zip
+          tools: composer:v2
+          coverage: none
+
+      - name: Cache Composer's downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/composer/files
+          key: composer-files-${{ hashFiles('composer.lock') }}
+
+      - name: Install Satis
+        env:
+          COMPOSER_AUTH: '{"github-oauth":{"github.com":"${{ github.token }}"}}'
+        run: composer install --no-interaction --no-progress
+
+      # What Satis read from the repositories last time: composer.json per commit, so a build reads only
+      # the tags that are new.
+      - name: Restore what Satis read before
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/composer/repo
+          key: satis-repo-${{ github.run_id }}
+          restore-keys: satis-repo-
+
+      # Read-only, for every repository the App is installed on, one hour.
+      - name: Get a read token for the packages' repositories
+        id: token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.REGISTRY_READER_CLIENT_ID }}
+          private-key: ${{ secrets.REGISTRY_READER_KEY }}
+          owner: ${{ github.repository_owner }}
+          permission-contents: read
+
+      # -vv says why Satis skips a tag; bin/check.php refuses the build when it does.
+      - name: Build
+        env:
+          COMPOSER_AUTH: '{"github-oauth":{"github.com":"${{ steps.token.outputs.token }}"}}'
+        run: composer satis:build satis.json _build --minify --no-interaction -vv
+
+      - name: Check against what is published
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+        run: php bin/check.php satis.json . _build | tee _build/changes.txt
+
+      - name: Keep what Satis read
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/composer/repo
+          key: satis-repo-${{ hashFiles('_build/p2/**') }}
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: registry
+          path: |
+            _build/packages.json
+            _build/p2/
+            _build/changes.txt
+          if-no-files-found: error
+          retention-days: 1
+
+  # Writes the registry. Runs nothing but git: no key, no PHP, no dependencies.
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: registry
+          path: ${{ runner.temp }}/registry
+
+      - name: Commit
+        env:
+          BUILT: ${{ runner.temp }}/registry
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          take_build() {
+            rm -rf p2 packages.json
+            cp -r "$BUILT/p2" "$BUILT/packages.json" .
+            git add -A p2 packages.json
+          }
+          take_build
+          git diff --cached --quiet && { echo "nothing changed"; exit 0; }
+
+          title=""
+          for change in published withdrawn moved; do
+            count=$(grep -c "^$change " "$BUILT/changes.txt" || true)
+            [ "$count" = 0 ] || title="${title:+$title, }$change $count"
+          done
+          title="${title:-rebuilt}"
+          title="Registry: $title"
+
+          git config user.name composer-registry
+          git config user.email composer-registry@users.noreply.github.com
+          for attempt in 1 2 3; do
+            git commit -q -m "$title" -m "$(cat "$BUILT/changes.txt")" -m "Build: $RUN"
+            git push -q origin HEAD:main && exit 0
+            # main moved on (a merged pull request) while this ran. The build was checked against p2/ as it
+            # is there too: only this workflow writes p2/, one run at a time. Put it on top and try again.
+            git fetch -q --depth=1 origin main
+            git reset -q --hard FETCH_HEAD
+            take_build
+            git diff --cached --quiet && exit 0
+          done
+          exit 1

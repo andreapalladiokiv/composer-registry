@@ -1,0 +1,71 @@
+name: Publish to the Composer registry
+description: Starts the registry's build after a release and waits for it; fails when the build refuses.
+
+# In a package's release workflow:
+#
+#   on: { push: { tags: ['v*'] } }
+#   jobs:
+#     registry:
+#       runs-on: ubuntu-latest
+#       steps:
+#         - uses: andreapalladiokiv/composer-registry/sync@main
+#           with:
+#             client-id: ${{ vars.COMPOSER_REGISTRY_TRIGGER_CLIENT_ID }}
+#             private-key: ${{ secrets.COMPOSER_REGISTRY_TRIGGER_KEY }}
+#
+# It sends nothing but "build": the registry reads every repository in its satis.json itself, so the
+# trigger App can make it build sooner, never publish something else.
+
+inputs:
+  client-id:
+    description: Client ID of the trigger App (Actions write on composer-registry only)
+    required: true
+  private-key:
+    description: Private key of the trigger App
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # Moving to the organization changes owner, repositories and REGISTRY below.
+    - name: Get a token that may start the registry's build
+      id: token
+      uses: actions/create-github-app-token@v3
+      with:
+        client-id: ${{ inputs.client-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: andreapalladiokiv
+        repositories: composer-registry
+        permission-actions: write
+
+    - name: Start the build and wait for it
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.token.outputs.token }}
+        REGISTRY: andreapalladiokiv/composer-registry
+      run: |
+        url=$(gh workflow run build.yml -R "$REGISTRY" --ref main -f repository="$GITHUB_REPOSITORY" 2>&1 \
+          | grep -o "https://github.com/$REGISTRY/actions/runs/[0-9]*" || true)
+        [ -n "$url" ] || { echo "::error::the registry did not say which build it started"; exit 1; }
+        id=${url##*/}
+
+        while :; do
+          echo "registry build: https://github.com/$REGISTRY/actions/runs/$id"
+          gh run watch "$id" -R "$REGISTRY" --interval 10 > /dev/null || true
+          conclusion=$(gh run view "$id" -R "$REGISTRY" --json conclusion -q .conclusion)
+          case "$conclusion" in
+            success)
+              exit 0 ;;
+            cancelled)
+              # Superseded while it waited: of several waiting builds GitHub keeps only the newest, which
+              # started after this release and covers it. Wait for that one.
+              newer=$(gh run list -R "$REGISTRY" -w build.yml -L 50 --json databaseId \
+                -q "[.[].databaseId | select(. > $id)] | max // empty")
+              [ -n "$newer" ] || { echo "::error::the registry build was cancelled"; exit 1; }
+              id=$newer ;;
+            *)
+              echo "::error::the registry refused the build ($conclusion); its log says why"
+              gh run view "$id" -R "$REGISTRY" --log-failed | tail -40
+              exit 1 ;;
+          esac
+        done

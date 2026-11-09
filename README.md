@@ -5,10 +5,9 @@ builds it from the release tags of the repositories listed in `satis.json`. It h
 version points at the zipball of its source repository at the released commit, so whoever may read a
 package's repository may install it, and nobody else.
 
-> **Status: proof of concept**, in a personal account, without consumers. The build workflow
-> (`.github/workflows/build.yml`) and the release action (`sync/action.yml`) described below are not in the
-> repository yet. Moving to the organization changes every `andreapalladiokiv/…` in this file, in
-> `satis.json` (`homepage`, `repositories`) and in the consumers' configuration.
+> **Status: proof of concept**, in a personal account, without consumers. Moving to the organization
+> changes every `andreapalladiokiv/…` in this file, in `satis.json` (`homepage`, `repositories`), in
+> `sync/action.yml` (the registry and its owner) and in the consumers' configuration.
 
 ```
 package repository                         composer-registry
@@ -192,8 +191,8 @@ Update it on purpose, `composer update composer/satis`, in a pull request of its
 | `bin/check.php` | what a build may not change about what is published |
 | `composer.json`, `composer.lock` | Satis, as a Composer plugin (`composer satis:build`) |
 | `packages.json`, `p2/` | written by the build: the entry point, and every version of each package in Composer's minified form |
-| `.github/workflows/build.yml` | *not yet:* builds with Satis, checks, commits |
-| `sync/action.yml` | *not yet:* what a package's release workflow uses to start the build and wait for it |
+| `.github/workflows/build.yml` | builds with Satis and checks (job `build`: the reader key, read-only), then commits (job `publish`: write, no key) |
+| `sync/action.yml` | what a package's release workflow uses to start the build and wait for it |
 
 The `homepage` in `satis.json` is not a homepage: Satis turns its path into `metadata-url`, which Composer
 completes with the host of the registry's URL, `api.github.com`.
